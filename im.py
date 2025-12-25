@@ -9,9 +9,13 @@ import toml
 st.set_page_config(page_title="Distributor Pareto Analysis Dashboard", layout="wide")
 
 def load_config():
-    """Loads FTP credentials and file paths from secrets.toml"""
-    return toml.load("secrets.toml")
-
+    """Accesses secrets directly from Streamlit's internal secrets management"""
+    try:
+        # On Streamlit Cloud, st.secrets behaves like a dictionary
+        return st.secrets
+    except Exception as e:
+        st.error("Secrets not found! Please add them to the Streamlit App Settings.")
+        return None
 # --- 2. INDIAN CURRENCY FORMATTER ---
 def format_inr(number):
     """Formats numbers into Indian numbering system (K, L, Cr)"""
