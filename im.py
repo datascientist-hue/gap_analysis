@@ -4,13 +4,25 @@ import numpy as np
 import ftplib
 import io
 import toml
+import os
 
 # --- 1. APP CONFIGURATION ---
+# This MUST be the very first Streamlit command
 st.set_page_config(page_title="Distributor Pareto Analysis Dashboard", layout="wide")
 
 def load_config():
-    """Loads FTP credentials and file paths from secrets.toml"""
-    return toml.load("secrets.toml")
+    """
+    Checks for secrets.toml or secret.toml and loads it.
+    """
+    # Try both common names to prevent errors
+    for filename in ["secrets.toml", "secret.toml"]:
+        if os.path.exists(filename):
+            try:
+                return toml.load(filename)
+            except Exception as e:
+                st.error(f"Error parsing {filename}: {e}")
+                return None
+    return None
 
 # --- 2. INDIAN CURRENCY FORMATTER ---
 def format_inr(number):
@@ -49,12 +61,18 @@ def main():
     st.markdown("### Strategic Performance Analysis (Tamil Nadu Pricing)")
 
     # Load Config
+    config = load_config()
+    
+    if config is None:
+        st.error("❌ **Configuration File Missing!**")
+        st.info("Please create a file named `secrets.toml` in the same folder as this script and paste your FTP credentials into it.")
+        st.stop() # Stops execution here so it doesn't crash later
+
     try:
-        config = load_config()
         paths = config['paths']
-    except Exception:
-        st.error("Missing or invalid secrets.toml file.")
-        return
+    except KeyError:
+        st.error("❌ **Invalid Configuration!** Section `[paths]` not found in TOML.")
+        st.stop()
 
     # Fetch Files
     with st.spinner('Syncing data from FTP...'):
@@ -65,7 +83,7 @@ def main():
         df_price = get_ftp_parquet(paths['price_list'], config)
 
     if df_aop.empty or df_sales.empty or df_price.empty:
-        st.error("Essential files are missing. Check FTP paths.")
+        st.error("Essential files are missing on FTP. Please check the paths in secrets.toml")
         return
 
     # --- 4. DATA CLEANING & STANDARDIZATION ---
@@ -142,37 +160,32 @@ def main():
     merged['Balance Raw'] = merged['Balance'].fillna(0).astype(float)
     merged['Payment Status'] = np.where(merged['Balance Raw'] > 0, "overdue", np.where(merged['Balance Raw'] < 0, "advance", "no due"))
 
-    # --- 7. PARETO CALCULATION (Distributor Level) ---
+    # --- 7. PARETO CALCULATION ---
     db_loss_summary = merged.groupby(['Region', 'DB Code', 'DB Name'])['Value Loss Raw'].sum().reset_index()
     db_loss_summary = db_loss_summary.sort_values(by='Value Loss Raw', ascending=False)
     db_loss_summary['Cumulative Loss'] = db_loss_summary['Value Loss Raw'].cumsum()
     total_market_loss = db_loss_summary['Value Loss Raw'].sum()
     db_loss_summary['Cumulative %'] = (db_loss_summary['Cumulative Loss'] / total_market_loss * 100) if total_market_loss > 0 else 0
     
-    # Define the "Vital Few"
     priority_db_codes = db_loss_summary[db_loss_summary['Cumulative %'] <= 81]['DB Code'].tolist()
     
-    # Filter for Unbilled SKUs for those priority DBs
     unbilled_focus_df = merged[
         (merged['DB Code'].isin(priority_db_codes)) & 
         (merged['PrimaryQtyinNos'] == 0) & 
         (merged['total_unit'] > 0)
     ].copy()
 
-    # --- 8. UI RENDERING & DYNAMIC FILTERS ---
+    # --- 8. UI RENDERING & FILTERS ---
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Global View Controls")
+    st.sidebar.subheader("Report View Controls")
     
-    # Region Filter
     sel_reg = st.sidebar.multiselect("Filter by Region", sorted(merged['Region'].unique()) if 'Region' in merged.columns else [])
     
-    # NEW: Performance Status Filter
     perf_status_options = sorted(merged['Performance_Status'].unique())
     sel_perf = st.sidebar.multiselect("Filter by Performance Status", options=perf_status_options, default=perf_status_options)
     
     final_df = merged.copy()
     
-    # Apply Filters
     if sel_reg:
         final_df = final_df[final_df['Region'].isin(sel_reg)]
         db_loss_summary = db_loss_summary[db_loss_summary['Region'].isin(sel_reg)]
@@ -188,26 +201,22 @@ def main():
     m3.metric("Vital Few DBs (80%)", f"{len(priority_db_codes)}")
     m4.metric("AOP Zero SKUs", final_df[final_df['Performance_Status'] == "aop zero"]['New SKU'].nunique())
 
-    # TABLE 1: PARETO DISTRIBUTOR SUMMARY
+    # TABLES
     st.subheader("🎯 Table 1: Top Distributors causing 80% of Loss")
-    st.markdown("Focus on these Distributors to capture the bulk of the missing business.")
     st.dataframe(db_loss_summary.style.format({
         'Value Loss Raw': lambda x: format_inr(x),
         'Cumulative Loss': lambda x: format_inr(x),
         'Cumulative %': '{:.2f}%'
     }), use_container_width=True)
 
-    # TABLE 2: UNBILLED ACTION LIST
     st.markdown("---")
     st.subheader("📝 Table 2: Action List - Unbilled SKUs for Priority Distributors")
-    st.info("These are SKUs where these priority distributors have a target but 0 actual billing.")
     st.dataframe(unbilled_focus_df[['Region', 'DB Code', 'DB Name', 'New SKU', 'total_unit','Cases' ,'Value Loss Raw', 'Cheque Status', 'Payment Status']].rename(columns={
         'total_unit': 'Target Units', 'Value Loss Raw': 'Potential Recovery','Cases':'Target Cases'
     }).sort_values('Potential Recovery', ascending=False).style.format({
         'Target Units': '{:.0f}', 'Potential Recovery': lambda x: format_inr(x), 'Target Cases': '{:.0f}'
     }), use_container_width=True)
 
-    # TABLE 3: FULL REPORT
     st.markdown("---")
     st.subheader("📋 Table 3: Full Distributor Detail Report")
     st.dataframe(final_df.rename(columns={
@@ -221,5 +230,4 @@ def main():
     st.download_button("📥 Download Action List", unbilled_focus_df.to_csv(index=False), "unbilled_action_list.csv")
 
 if __name__ == "__main__":
-
     main()
