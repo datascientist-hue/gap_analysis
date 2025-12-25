@@ -36,7 +36,7 @@ def format_inr(number):
 @st.cache_data(ttl=300)
 def get_ftp_parquet(file_path, config):
     try:
-        ftp_cfg = config['ftp']
+        ftp_cfg =  st.secrets['ftp']
         ftp = ftplib.FTP(ftp_cfg['host'])
         ftp.login(ftp_cfg['user'], ftp_cfg['password'])
         flo = io.BytesIO()
@@ -52,22 +52,20 @@ def main():
     st.title("🚀 Distributor 80/20 Gap & Action Dashboard")
     st.markdown("### Strategic Performance Analysis (Tamil Nadu Pricing)")
 
-    # Load Config
-    try:
-        config = load_config()
-        paths = config['paths']
-    except Exception:
-        st.error("Missing or invalid secrets.toml file.")
+    # Check if secrets exist
+    if "paths" not in st.secrets:
+        st.error("Secrets not found! Please add them to the Streamlit App Settings.")
         return
 
-    # Fetch Files
-    with st.spinner('Syncing data from FTP...'):
-        df_aop = get_ftp_parquet(paths['aop'], config)
-        df_sales = get_ftp_parquet(paths['primary_sales'], config)
-        df_cheque = get_ftp_parquet(paths['cheque_status'], config)
-        df_master = get_ftp_parquet(paths['db_master'], config)
-        df_price = get_ftp_parquet(paths['price_list'], config)
+    paths = st.secrets['paths']
 
+    # Fetch Files - REMOVED 'config' from the calls below
+    with st.spinner('Syncing data from FTP...'):
+        df_aop = get_ftp_parquet(paths['aop'])
+        df_sales = get_ftp_parquet(paths['primary_sales'])
+        df_cheque = get_ftp_parquet(paths['cheque_status'])
+        df_master = get_ftp_parquet(paths['db_master'])
+        df_price = get_ftp_parquet(paths['price_list'])
     if df_aop.empty or df_sales.empty or df_price.empty:
         st.error("Essential files are missing. Check FTP paths.")
         return
