@@ -33,7 +33,7 @@ def format_inr(number):
 
 # --- 3. FTP DATA LOADER ---
 @st.cache_data(ttl=300)
-def get_ftp_parquet(file_path, config):
+def get_ftp_parquet(file_path):
     try:
         ftp_cfg =  st.secrets['ftp']
         ftp = ftplib.FTP(ftp_cfg['host'])
@@ -224,3 +224,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
