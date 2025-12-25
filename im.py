@@ -9,8 +9,8 @@ import toml
 st.set_page_config(page_title="Distributor Pareto Analysis Dashboard", layout="wide")
 
 def load_config():
-    """Loads FTP credentials and file paths from secret.toml"""
-    return toml.load("secret.toml")
+    """Loads FTP credentials and file paths from secrets.toml"""
+    return toml.load("secrets.toml")
 
 # --- 2. INDIAN CURRENCY FORMATTER ---
 def format_inr(number):
@@ -53,7 +53,7 @@ def main():
         config = load_config()
         paths = config['paths']
     except Exception:
-        st.error("Missing or invalid secret.toml file.")
+        st.error("Missing or invalid secrets.toml file.")
         return
 
     # Fetch Files
@@ -221,4 +221,5 @@ def main():
     st.download_button("📥 Download Action List", unbilled_focus_df.to_csv(index=False), "unbilled_action_list.csv")
 
 if __name__ == "__main__":
+
     main()
