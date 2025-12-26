@@ -89,7 +89,7 @@ def main():
 
     # --- 4. SIDEBAR CONFIGURATION ---
     st.sidebar.header("🔧 Settings")
-    source_mode = st.sidebar.radio("Data Source Mode", ["FTP", "Local"])
+    source_mode = st.sidebar.radio("Data Source Mode", ["FTP"])
 
     with st.spinner('Syncing data...'):
         df_aop = load_data('aop', source_mode)
@@ -380,4 +380,5 @@ def main():
     st.sidebar.download_button("📥 Download Report (CSV)", final_df.to_csv(index=False), f"analysis_{selected_jc}.csv")
 
 if __name__ == "__main__":
+
     main()
