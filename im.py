@@ -6,6 +6,49 @@ import io
 import os
 import re
 
+def check_password():
+    """Returns `True` if the user had the correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if (
+            st.session_state["username"] in st.secrets["passwords"]
+            and st.session_state["password"]
+            == st.secrets["passwords"][st.session_state["username"]]
+        ):
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store password
+            del st.session_state["username"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run, show inputs for username and password.
+        st.title("🔐 Login to Dashboard")
+        st.text_input("Username", on_change=None, key="username")
+        st.text_input("Password", type="password", on_change=None, key="password")
+        if st.button("Log In"):
+            password_entered()
+            if st.session_state.get("password_correct"):
+                st.rerun()
+            else:
+                st.error("😕 User not found or password incorrect")
+        return False
+    
+    elif not st.session_state["password_correct"]:
+        # Password not correct, show input + error.
+        st.text_input("Username", on_change=None, key="username")
+        st.text_input("Password", type="password", on_change=None, key="password")
+        if st.button("Log In"):
+            password_entered()
+            st.rerun()
+        st.error("😕 User not found or password incorrect")
+        return False
+    else:
+        # Password correct.
+        return True
+
+
 # --- 0. PANDAS CONFIGURATION ---
 # Fix for the "styler.render.max_elements" error for large master reports
 pd.set_option("styler.render.max_elements", 2000000)
@@ -274,7 +317,10 @@ def main():
     if sel_ASE:
         db_summary = db_summary[db_summary['ASE'].isin(sel_ASE)]
 
-
+    all_prod = sorted([str(x) for x in merged['Updated Category'].unique() if pd.notna(x) and x != 0])
+    sel_prod = st.sidebar.multiselect("Filter by Prod_ctg", all_prod, default=[])
+    if sel_prod:
+        merged = merged[merged['Updated Category'].isin(sel_prod)]
     
     allowed_dbs = db_summary['DB Code'].tolist()
     final_df = merged[merged['DB Code'].isin(allowed_dbs)].copy()
@@ -350,7 +396,7 @@ def main():
     st.markdown("---")
     view = st.radio(
         "📊 Select Dashboard View:",
-        ["🎯 Pareto Summary", '👥 ASE Wise Summary','👥 SO Wise Summary',"📉 Performance Gap", "📝 Unbilled Action List", "✅ Target Achieved", "🎁 Non-AOP Sales", "📋 Full Master Report"],
+        ["🎯 Pareto Summary","📦 Category Summary" ,'👥 ASE Wise Summary','👥 SO Wise Summary',"📉 Performance Gap", "📝 Unbilled Action List", "✅ Target Achieved", "🎁 Non-AOP Sales", "📋 Full Master Report"],
         horizontal=True
     )
 
@@ -375,7 +421,7 @@ def main():
     if view == "🎯 Pareto Summary":
         st.subheader("High-Loss Distributor Analysis")
         display_df = db_summary.rename(columns=col_map)
-        st.dataframe(display_df.style.format(fmt_std), use_container_width=True)
+        st.dataframe(display_df.style.format(fmt_std), use_container_width=True,hide_index=True)
         numeric_to_sum = ['Sales Loss', 'Target Volume (MT)', 'Volume Loss (MT)', 'DB Billcuts', 'Actual Value (Inv)']
         display_fixed_totals(display_df, numeric_to_sum, fmt_std)
 
@@ -395,8 +441,40 @@ def main():
         
         ase_display = ase_summary.rename(columns=col_map)
         fmt_ase = {**fmt_std, 'Ach % (Vol)': '{:.1f}%', 'Distributors': '{:.0f}'}
-        st.dataframe(ase_display.sort_values('Sales Loss', ascending=False).style.format(fmt_ase), use_container_width=True)
+        st.dataframe(ase_display.sort_values('Sales Loss', ascending=False).style.format(fmt_ase), use_container_width=True,hide_index=True)
         display_fixed_totals(ase_display, ['Target Units', 'Actual Units', 'Target vol', 'Actual vol', 'Sales Loss', 'Actual Value (Inv)'], fmt_ase)
+    
+    elif view == "📦 Category Summary":
+        st.subheader("Product Category: Target vs Actual")
+        
+        # Grouping by Updated Category
+        cat_summary = final_df.groupby(['Updated Category']).agg({
+            'target_in_qty(vol)': 'sum',
+            'PrimaryQtyInLtrs/Kgs': 'sum',
+            'Sales Loss': 'sum',
+            'Actual Value': 'sum'
+        }).reset_index()
+        
+        # Calculate Achievement %
+        cat_summary['Ach % (Vol)'] = (cat_summary['PrimaryQtyInLtrs/Kgs'] / cat_summary['target_in_qty(vol)'] * 100).replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # Rename for display
+        cat_display = cat_summary.rename(columns=col_map)
+        
+        # Define specific format for this table (adding Ach %)
+        fmt_cat = {**fmt_std, 'Ach % (Vol)': '{:.1f}%'}
+        
+        # Display table
+        st.dataframe(
+            cat_display.sort_values('Target volume', ascending=False).style.format(fmt_cat), 
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Display Grand Totals
+        numeric_to_sum = ['Target volume', 'Actual volume', 'Sales Loss', 'Actual Value (Inv)']
+        display_fixed_totals(cat_display, numeric_to_sum, fmt_cat)
+
 
     elif view == "👥 SO Wise Summary":
         st.subheader("SO Performance Breakdown")
@@ -415,41 +493,41 @@ def main():
         
         so_display = so_summary.rename(columns=col_map)
         fmt_so = {**fmt_std, 'Ach % (Vol)': '{:.1f}%', 'Distributors': '{:.0f}'}
-        st.dataframe(so_display.sort_values('Sales Loss', ascending=False).style.format(fmt_so), use_container_width=True)
+        st.dataframe(so_display.sort_values('Sales Loss', ascending=False).style.format(fmt_so), use_container_width=True,hide_index=True)
         display_fixed_totals(so_display, ['Target Units', 'Actual Units', 'Target vol', 'Actual vol', 'Sales Loss', 'Actual Value (Inv)'], fmt_so)
 
     elif view == "📉 Performance Gap":
         st.subheader("Gap Analysis: Partially Billed SKUs below Target")
         gap_data = final_df[(final_df['Unit Gap'] > 0) & (final_df['PrimaryQtyinNos'] > 0)].copy()
-        display_cols = ['Region', 'DB Name', 'New SKU', 'Cases', 'PrimaryQtyinCases/Bags', 'target_in_qty(vol)', 'PrimaryQtyInLtrs/Kgs', 'Sales Loss', 'Billcuts']
+        display_cols = ['Region', 'DB Name','Updated Category' ,'New SKU', 'Cases', 'PrimaryQtyinCases/Bags', 'target_in_qty(vol)', 'PrimaryQtyInLtrs/Kgs', 'Sales Loss', 'Billcuts']
         res_df = gap_data[display_cols].rename(columns=col_map).sort_values('Sales Loss', ascending=False)
-        st.dataframe(res_df.style.format(fmt_std), use_container_width=True)
+        st.dataframe(res_df.style.format(fmt_std), use_container_width=True,hide_index=True)
         numeric_to_sum = ['Target Cases', 'Actual Cases', 'Target volume', 'Actual volume', 'Sales Loss', 'DB Billcuts']
         display_fixed_totals(res_df, numeric_to_sum, fmt_std)
 
     elif view == "📝 Unbilled Action List":
         st.subheader("Urgent Action: Targeted SKUs with 0 Billing")
         unbilled = final_df[(final_df['PrimaryQtyinNos'] == 0) & (final_df['total_unit'] > 0)].copy()
-        display_cols = ['Region', 'DB Name', 'New SKU', 'total_unit', 'Cases', 'target_in_qty(vol)', 'Sales Loss', 'Billcuts']
+        display_cols = ['Region', 'DB Name', 'Updated Category','New SKU', 'total_unit', 'Cases', 'target_in_qty(vol)', 'Sales Loss', 'Billcuts']
         res_df = unbilled[display_cols].rename(columns=col_map).sort_values('Sales Loss', ascending=False)
-        st.dataframe(res_df.style.format(fmt_std), use_container_width=True)
+        st.dataframe(res_df.style.format(fmt_std), use_container_width=True,hide_index=True)
         numeric_to_sum = ['Target Units', 'Target Cases', 'Target volume', 'Sales Loss', 'DB Billcuts']
         display_fixed_totals(res_df, numeric_to_sum, fmt_std)
 
     elif view == "✅ Target Achieved":
         st.subheader("Achievement Tracking: Performance >= Target")
         billed = final_df[(final_df['PrimaryQtyinNos'] >= final_df['total_unit']) & (final_df['total_unit'] > 0)].copy()
-        display_cols = ['Region', 'DB Name', 'New SKU', 'total_unit', 'PrimaryQtyinNos', 'target_in_qty(vol)', 'PrimaryQtyInLtrs/Kgs', 'Actual Value', 'Billcuts']
+        display_cols = ['Region', 'DB Name','Updated Category' ,'New SKU', 'total_unit', 'PrimaryQtyinNos', 'target_in_qty(vol)', 'PrimaryQtyInLtrs/Kgs', 'Actual Value', 'Billcuts']
         res_df = billed[display_cols].rename(columns=col_map).sort_values('Actual Value (Inv)', ascending=False)
-        st.dataframe(res_df.style.format(fmt_std), use_container_width=True)
+        st.dataframe(res_df.style.format(fmt_std), use_container_width=True,hide_index=True)
         numeric_to_sum = ['Target Units', 'Actual Units', 'Target volume', 'Actual volume', 'Actual Value (Inv)', 'DB Billcuts']
         display_fixed_totals(res_df, numeric_to_sum, fmt_std)
 
     elif view == "🎁 Non-AOP Sales":
         st.subheader("Incremental Sales: SKUs Billed without AOP Targets")
-        display_cols = ['Region', 'DB Name', 'New SKU', 'PrimaryQtyinNos', 'PrimaryQtyinCases/Bags', 'PrimaryQtyInLtrs/Kgs', 'PrimaryLineTotalBeforeTax', 'Billcuts']
+        display_cols = ['Region', 'DB Name', 'Updated Category','New SKU', 'PrimaryQtyinNos', 'PrimaryQtyinCases/Bags', 'PrimaryQtyInLtrs/Kgs', 'PrimaryLineTotalBeforeTax', 'Billcuts']
         res_df = non_aop_df[display_cols].rename(columns=col_map).sort_values('Inv Value Before Tax', ascending=False)
-        st.dataframe(res_df.style.format(fmt_std), use_container_width=True)
+        st.dataframe(res_df.style.format(fmt_std), use_container_width=True,hide_index=True)
         numeric_to_sum = ['Actual Units', 'Actual Cases', 'Actual volume', 'Inv Value Before Tax', 'DB Billcuts']
         display_fixed_totals(res_df, numeric_to_sum, fmt_std)
 
@@ -458,7 +536,7 @@ def main():
     elif view == "📋 Full Master Report":
         st.subheader("Complete Data Matrix")
         master_display = final_df.rename(columns=col_map)
-        st.dataframe(master_display.style.format(fmt_std), use_container_width=True)
+        st.dataframe(master_display.style.format(fmt_std), use_container_width=True,hide_index=True)
         num_cols = master_display.select_dtypes(include=[np.number]).columns.tolist()
         display_fixed_totals(master_display, num_cols, fmt_std)
 
@@ -467,4 +545,5 @@ def main():
     st.sidebar.download_button("📥 Download Report (CSV)", final_df.to_csv(index=False), f"analysis_{selected_jc}.csv")
 
 if __name__ == "__main__":
-    main()
+    if check_password():
+        main()
